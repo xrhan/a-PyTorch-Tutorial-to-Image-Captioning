@@ -11,7 +11,7 @@ from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 
 # Data parameters
-data_folder = '/media/ssd/caption data'  # folder with data files saved by create_input_files.py
+data_folder = '/nycc'  # folder with data files saved by create_input_files.py
 data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
@@ -34,8 +34,9 @@ grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 100  # print training/validation stats every __ batches
-fine_tune_encoder = False  # fine-tune encoder?
-checkpoint = None  # path to checkpoint, None if none
+fine_tune_encoder = True  # fine-tune encoder?
+#checkpoint = None  # path to checkpoint, None if none
+checkpoint = 'BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
 
 
 def main():
@@ -88,8 +89,14 @@ def main():
     # Custom dataloaders
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
+
+    # data augmention for nycc dataset
+    augment = transforms.Compose([
+            transforms.RandomAffine(10, (0.1, 0.1), (0.9, 1.1)),
+            transforms.RandomHorizontalFlip(p=0.5)])
+
     train_loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, 'TRAIN', transform=transforms.Compose([normalize])),
+        CaptionDataset(data_folder, data_name, 'TRAIN', transform=transforms.Compose([augment, normalize])),
         batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(
         CaptionDataset(data_folder, data_name, 'VAL', transform=transforms.Compose([normalize])),
