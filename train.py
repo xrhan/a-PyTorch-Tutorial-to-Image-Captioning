@@ -71,9 +71,13 @@ def main():
         epochs_since_improvement = checkpoint['epochs_since_improvement']
         best_bleu4 = checkpoint['bleu-4']
         decoder = checkpoint['decoder']
-        decoder_optimizer = checkpoint['decoder_optimizer']
-        encoder = checkpoint['encoder']
-        encoder_optimizer = checkpoint['encoder_optimizer']
+        # decoder_optimizer = checkpoint['decoder_optimizer']
+        decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
+                                             lr=decoder_lr)
+        encoder = Encoder()
+        encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
+        # encoder = checkpoint['encoder'] has some dependency issues
+        # encoder_optimizer = checkpoint['encoder_optimizer']
         if fine_tune_encoder is True and encoder_optimizer is None:
             encoder.fine_tune(fine_tune_encoder)
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
@@ -183,8 +187,8 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
 
         # Remove timesteps that we didn't decode at, or are pads
         # pack_padded_sequence is an easy trick to do this
-        scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-        targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+        scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
+        targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
 
         # Calculate loss
         loss = criterion(scores, targets)
@@ -274,8 +278,8 @@ def validate(val_loader, encoder, decoder, criterion):
             # Remove timesteps that we didn't decode at, or are pads
             # pack_padded_sequence is an easy trick to do this
             scores_copy = scores.clone()
-            scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-            targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+            scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
+            targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
 
             # Calculate loss
             loss = criterion(scores, targets)
