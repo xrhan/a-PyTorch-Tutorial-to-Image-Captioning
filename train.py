@@ -43,10 +43,12 @@ fine_tune_encoder = True  # fine-tune encoder?
 checkpoint = 'BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
 encoder_resnet = None
 
-with open(f'{data_folder}/train_path.json', 'r') as f:
+
+with open(f'{data_folder}/train.json', 'r') as f:
     train_files_list = json.load(f)
-with open(f'{data_folder}/val_path.json', 'r') as f:
+with open(f'{data_folder}/val.json', 'r') as f:
     val_files_list = json.load(f)
+
 
 def run_samples(encoder, decoder, fs, n, path_prefix, word_map, rev_word_map):
     for i in range(n):
