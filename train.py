@@ -46,8 +46,10 @@ encoder_resnet = None
 
 with open(f'{data_folder}/train.json', 'r') as f:
     train_files_list = json.load(f)
+    train_files_list = [f"{train_imgs}/{t}" for t in train_files_list]
 with open(f'{data_folder}/val.json', 'r') as f:
     val_files_list = json.load(f)
+    val_files_list = [f"{val_imgs}/{t}" for t in val_files_list]
 
 
 def run_samples(encoder, decoder, fs, n, path_prefix, word_map, rev_word_map):
@@ -124,7 +126,7 @@ def main():
 
     # data augmention for nycc dataset
     augment = transforms.Compose([
-            transforms.RandomAffine(10, (0.1, 0.1), (0.9, 1.1)),
+            transforms.RandomAffine(10, (0.1, 0.1), (0.9, 1.2)),
             transforms.RandomHorizontalFlip(p=0.5)])
 
     train_loader = torch.utils.data.DataLoader(
