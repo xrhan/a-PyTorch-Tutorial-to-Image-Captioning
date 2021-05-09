@@ -27,7 +27,7 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 10  # number of epochs to train for (if early stopping is not triggered)
+epochs = 30  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
 batch_size = 32
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -36,12 +36,11 @@ decoder_lr = 4e-4  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_bleu4 = 0.  # BLEU-4 score right now
-print_freq = 100  # print training/validation stats every __ batches
+print_freq = 20  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 # checkpoint = None  # path to checkpoint, None if none
 checkpoint = 'no_finetune_BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
-main_encoder_resnet = None
-
+main_encoder_resnet = 'sketch_weights79_epoch9.pt'
 
 # Read word map
 word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
@@ -99,7 +98,8 @@ def main():
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
         if main_encoder_resnet is not None:
-            encoder = Encoder(specify_resnet=main_encoder_resnet) # specify here so the encoder remove the last 2 layers of resnet
+            encoder = Encoder(
+                specify_resnet=main_encoder_resnet)  # specify here so the encoder remove the last 2 layers of resnet
             encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
 
         else:
@@ -107,9 +107,14 @@ def main():
 
         # encoder_optimizer = checkpoint['encoder_optimizer']
         # if fine_tune_encoder is True and encoder_optimizer is None:
+
         if fine_tune_encoder is True:
             print("Will fine tune Encoder")
             encoder.fine_tune(fine_tune_encoder)
+            encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                                 lr=encoder_lr)
+
+        else:
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                                  lr=encoder_lr)
 
@@ -140,7 +145,7 @@ def main():
     for epoch in range(start_epoch, epochs):
 
         # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
-        if epochs_since_improvement == 20:
+        if epochs_since_improvement == 30:
             break
         if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
             adjust_learning_rate(decoder_optimizer, 0.8)
@@ -170,10 +175,14 @@ def main():
             print("\nEpochs since last improvement: %d\n" % (epochs_since_improvement,))
         else:
             epochs_since_improvement = 0
+            # Save checkpoint
+            print(" *** saving model with bleu score: ", recent_bleu4)
+            save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
+                            decoder_optimizer, recent_bleu4, is_best)
 
-        # Save checkpoint
-        save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
-                        decoder_optimizer, recent_bleu4, is_best)
+    print(" *** LAST EPOCH saving model with bleu score: ", recent_bleu4)
+    save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
+                    decoder_optimizer, recent_bleu4, is_best)
 
 
 def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_optimizer, epoch):
@@ -367,9 +376,9 @@ def validate(val_loader, encoder, decoder, criterion, epoch):
                 bleu=bleu4))
         # Run on some examples
 
-    print(f'run on examples after epoch {epoch}')
-    run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
-    run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
+    # print(f'run on examples after epoch {epoch}')
+    # run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
+    # run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
 
     return bleu4
 

@@ -16,7 +16,9 @@ class Encoder(nn.Module):
 
         if specify_resnet is not None:
             print("Initialize with user-specified resnet101")
-            resnet = torch.load(specify_resnet)
+            resnet = torchvision.models.resnet101(pretrained=False)
+            resnet.load_state_dict(torch.load(specify_resnet))
+
         else:
             print("Initialize with regular pre-trained resnet101")
             resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
