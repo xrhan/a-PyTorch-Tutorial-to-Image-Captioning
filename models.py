@@ -10,11 +10,16 @@ class Encoder(nn.Module):
     Encoder.
     """
 
-    def __init__(self, encoded_image_size=14):
+    def __init__(self, encoded_image_size=14, specify_resnet = None):
         super(Encoder, self).__init__()
         self.enc_image_size = encoded_image_size
 
-        resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+        if specify_resnet is not None:
+            print("Initialize with user-specified resnet101")
+            resnet = torch.load(specify_resnet)
+        else:
+            print("Initialize with regular pre-trained resnet101")
+            resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
 
         # Remove linear and pool layers (since we're not doing classification)
         modules = list(resnet.children())[:-2]
@@ -49,6 +54,20 @@ class Encoder(nn.Module):
         for c in list(self.resnet.children())[5:]:
             for p in c.parameters():
                 p.requires_grad = fine_tune
+
+
+""" Try Concatenation OR Addition
+Dual Encoder
+out_main = out_main.permute(0,3,1,2)
+out_main = out_main.view(batch_size, 2048, 14 * 14)
+out_sketch = out_sketch.permute(0,3,1,2)
+out_sketch = out_sketch.view(batch_size, 2048, 14 * 14)
+out_combined = torch.concatenate([out_main, out_sketch], dim = 2)
+print(out_combined.shape)
+nn.dropout(p=0.2)
+nn.Linear(14*14*2, 14*14)
+nn.ReLU()
+"""
 
 
 class Attention(nn.Module):

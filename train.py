@@ -40,7 +40,8 @@ print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 # checkpoint = None  # path to checkpoint, None if none
 checkpoint = 'no_finetune_BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
-encoder_resnet = None
+main_encoder_resnet = None
+
 
 # Read word map
 word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
@@ -83,7 +84,7 @@ def main():
                                        dropout=dropout)
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
-        encoder = Encoder()
+        encoder = Encoder(specify_resnet=main_encoder_resnet)
         encoder.fine_tune(fine_tune_encoder)
         encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                              lr=encoder_lr) if fine_tune_encoder else None
@@ -97,16 +98,17 @@ def main():
         # decoder_optimizer = checkpoint['decoder_optimizer']
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
-        encoder = Encoder()
-        # encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
-        encoder = checkpoint['encoder']
+        if main_encoder_resnet is not None:
+            encoder = Encoder(specify_resnet=main_encoder_resnet) # specify here so the encoder remove the last 2 layers of resnet
+            encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
 
-        if encoder_resnet is not None:  # load use specified restnet101:
-            encoder.resnet = torch.load(encoder_resnet)
+        else:
+            encoder = checkpoint['encoder']
 
         # encoder_optimizer = checkpoint['encoder_optimizer']
         # if fine_tune_encoder is True and encoder_optimizer is None:
         if fine_tune_encoder is True:
+            print("Will fine tune Encoder")
             encoder.fine_tune(fine_tune_encoder)
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                                  lr=encoder_lr)
