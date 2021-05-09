@@ -13,7 +13,6 @@ from collections import OrderedDict
 from caption import visualize_att, caption_image_beam_search
 import random
 
-
 # Data parameters
 data_folder = 'nycc'  # folder with data files saved by create_input_files.py
 data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
@@ -28,7 +27,7 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 120  # number of epochs to train for (if early stopping is not triggered)
+epochs = 10  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
 batch_size = 32
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -39,17 +38,22 @@ alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as i
 best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
-#checkpoint = None  # path to checkpoint, None if none
-checkpoint = 'BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
+# checkpoint = None  # path to checkpoint, None if none
+checkpoint = 'no_finetune_BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
 encoder_resnet = None
 
+# Read word map
+word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
+with open(word_map_file, 'r') as j:
+    word_map = json.load(j)
+rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
 
 with open(f'{data_folder}/train.json', 'r') as f:
     train_files_list = json.load(f)
-    train_files_list = [f"{train_imgs}/{t}" for t in train_files_list]
+    train_files_list = [f"{data_folder}/train_imgs/{t}" for t in train_files_list]
 with open(f'{data_folder}/val.json', 'r') as f:
     val_files_list = json.load(f)
-    val_files_list = [f"{val_imgs}/{t}" for t in val_files_list]
+    val_files_list = [f"{data_folder}/val_imgs/{t}" for t in val_files_list]
 
 
 def run_samples(encoder, decoder, fs, n, path_prefix, word_map, rev_word_map):
@@ -70,12 +74,6 @@ def main():
 
     global best_bleu4, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
-    # Read word map
-    word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
-    with open(word_map_file, 'r') as j:
-        word_map = json.load(j)
-    rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
-
     # Initialize / load checkpoint
     if checkpoint is None:
         decoder = DecoderWithAttention(attention_dim=attention_dim,
@@ -91,9 +89,9 @@ def main():
                                              lr=encoder_lr) if fine_tune_encoder else None
 
     else:
-        checkpoint = torch.load(checkpoint)
-        start_epoch = checkpoint['epoch'] + 1
-        epochs_since_improvement = checkpoint['epochs_since_improvement']
+        checkpoint = torch.load(checkpoint, map_location='cuda:0')
+        # start_epoch = checkpoint['epoch'] + 1
+        # epochs_since_improvement = checkpoint['epochs_since_improvement']
         # best_bleu4 = checkpoint['bleu-4'] this metric is unfair when we switch to a different domain
         decoder = checkpoint['decoder']
         # decoder_optimizer = checkpoint['decoder_optimizer']
@@ -103,7 +101,7 @@ def main():
         # encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
         encoder = checkpoint['encoder']
 
-        if encoder_resnet is not None: # load use specified restnet101:
+        if encoder_resnet is not None:  # load use specified restnet101:
             encoder.resnet = torch.load(encoder_resnet)
 
         # encoder_optimizer = checkpoint['encoder_optimizer']
@@ -126,8 +124,8 @@ def main():
 
     # data augmention for nycc dataset
     augment = transforms.Compose([
-            transforms.RandomAffine(10, (0.1, 0.1), (0.9, 1.2)),
-            transforms.RandomHorizontalFlip(p=0.5)])
+        transforms.RandomAffine(10, (0.1, 0.1), (0.9, 1.2)),
+        transforms.RandomHorizontalFlip(p=0.5)])
 
     train_loader = torch.utils.data.DataLoader(
         CaptionDataset(data_folder, data_name, 'TRAIN', transform=transforms.Compose([augment, normalize])),
@@ -160,7 +158,7 @@ def main():
         recent_bleu4 = validate(val_loader=val_loader,
                                 encoder=encoder,
                                 decoder=decoder,
-                                criterion=criterion)
+                                criterion=criterion, epoch=epoch)
 
         # Check if there was an improvement
         is_best = recent_bleu4 > best_bleu4
@@ -174,12 +172,6 @@ def main():
         # Save checkpoint
         save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
                         decoder_optimizer, recent_bleu4, is_best)
-
-        # Run on some examples
-        print(f'run on examples after epoch {epoch}')
-        run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
-        run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
-
 
 
 def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_optimizer, epoch):
@@ -269,7 +261,7 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
                                                                           top5=top5accs))
 
 
-def validate(val_loader, encoder, decoder, criterion):
+def validate(val_loader, encoder, decoder, criterion, epoch):
     """
     Performs one epoch's validation.
 
@@ -335,7 +327,8 @@ def validate(val_loader, encoder, decoder, criterion):
                 print('Validation: [{0}/{1}]\t'
                       'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Top-5 Accuracy {top5.val:.3f} ({top5.avg:.3f})\t'.format(i, len(val_loader), batch_time=batch_time,
+                      'Top-5 Accuracy {top5.val:.3f} ({top5.avg:.3f})\t'.format(i, len(val_loader),
+                                                                                batch_time=batch_time,
                                                                                 loss=losses, top5=top5accs))
 
             # Store references (true captions), and hypothesis (prediction) for each image
@@ -370,6 +363,11 @@ def validate(val_loader, encoder, decoder, criterion):
                 loss=losses,
                 top5=top5accs,
                 bleu=bleu4))
+        # Run on some examples
+
+    print(f'run on examples after epoch {epoch}')
+    run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
+    run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
 
     return bleu4
 
