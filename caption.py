@@ -147,7 +147,7 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
     return seq, alphas
 
 
-def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
+def visualize_att(image_path, seq, alphas, rev_word_map, save_path="", smooth=True):
     """
     Visualizes caption with weights at every word.
 
@@ -163,7 +163,7 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
     image = image.resize([14 * 24, 14 * 24], Image.LANCZOS)
 
     words = [rev_word_map[ind] for ind in seq]
-
+    plt.figure()
     for t in range(len(words)):
         if t > 50:
             break
@@ -182,7 +182,11 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
             plt.imshow(alpha, alpha=0.8)
         plt.set_cmap(cm.Greys_r)
         plt.axis('off')
-    plt.show()
+    if len(save_path) > 0:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+    plt.cla()
 
 
 if __name__ == '__main__':
@@ -215,4 +219,4 @@ if __name__ == '__main__':
     alphas = torch.FloatTensor(alphas)
 
     # Visualize caption and attention of best sequence
-    visualize_att(args.img, seq, alphas, rev_word_map, args.smooth)
+    visualize_att(args.img, seq, alphas, rev_word_map, "", args.smooth)

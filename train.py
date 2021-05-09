@@ -9,9 +9,13 @@ from models import Encoder, DecoderWithAttention
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
+from collections import OrderedDict
+from caption import visualize_att, caption_image_beam_search
+import random
+
 
 # Data parameters
-data_folder = '/nycc'  # folder with data files saved by create_input_files.py
+data_folder = 'nycc'  # folder with data files saved by create_input_files.py
 data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
@@ -37,6 +41,22 @@ print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 #checkpoint = None  # path to checkpoint, None if none
 checkpoint = 'BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
+encoder_resnet = None
+
+with open(f'{data_folder}/train_path.json', 'r') as f:
+    train_files_list = json.load(f)
+with open(f'{data_folder}/val_path.json', 'r') as f:
+    val_files_list = json.load(f)
+
+def run_samples(encoder, decoder, fs, n, path_prefix, word_map, rev_word_map):
+    for i in range(n):
+        f = fs[random.randint(0, len(fs) - 1)]
+        # Encode, decode with attention and beam search
+        seq, alphas = caption_image_beam_search(encoder, decoder, f, word_map, 5)
+        alphas = torch.FloatTensor(alphas)
+
+        # Visualize caption and attention of best sequence
+        visualize_att(f, seq, alphas, rev_word_map, f'{path_prefix}_{i}_result.png')
 
 
 def main():
@@ -50,6 +70,7 @@ def main():
     word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
     with open(word_map_file, 'r') as j:
         word_map = json.load(j)
+    rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
 
     # Initialize / load checkpoint
     if checkpoint is None:
@@ -69,16 +90,21 @@ def main():
         checkpoint = torch.load(checkpoint)
         start_epoch = checkpoint['epoch'] + 1
         epochs_since_improvement = checkpoint['epochs_since_improvement']
-        best_bleu4 = checkpoint['bleu-4']
+        # best_bleu4 = checkpoint['bleu-4'] this metric is unfair when we switch to a different domain
         decoder = checkpoint['decoder']
         # decoder_optimizer = checkpoint['decoder_optimizer']
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
         encoder = Encoder()
-        encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
-        # encoder = checkpoint['encoder'] has some dependency issues
+        # encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
+        encoder = checkpoint['encoder']
+
+        if encoder_resnet is not None: # load use specified restnet101:
+            encoder.resnet = torch.load(encoder_resnet)
+
         # encoder_optimizer = checkpoint['encoder_optimizer']
-        if fine_tune_encoder is True and encoder_optimizer is None:
+        # if fine_tune_encoder is True and encoder_optimizer is None:
+        if fine_tune_encoder is True:
             encoder.fine_tune(fine_tune_encoder)
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                                  lr=encoder_lr)
@@ -144,6 +170,12 @@ def main():
         # Save checkpoint
         save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
                         decoder_optimizer, recent_bleu4, is_best)
+
+        # Run on some examples
+        print(f'run on examples after epoch {epoch}')
+        run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
+        run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
+
 
 
 def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_optimizer, epoch):
