@@ -403,7 +403,7 @@ def validate(val_loader, encoder, decoder, criterion, epoch):
 
     # print(f'run on examples after epoch {epoch}')
     # run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
-    # run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
+    run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
 
     return bleu4
 
