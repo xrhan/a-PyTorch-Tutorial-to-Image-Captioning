@@ -58,18 +58,88 @@ class Encoder(nn.Module):
                 p.requires_grad = fine_tune
 
 
-""" Try Concatenation OR Addition
-Dual Encoder
-out_main = out_main.permute(0,3,1,2)
-out_main = out_main.view(batch_size, 2048, 14 * 14)
-out_sketch = out_sketch.permute(0,3,1,2)
-out_sketch = out_sketch.view(batch_size, 2048, 14 * 14)
-out_combined = torch.concatenate([out_main, out_sketch], dim = 2)
-print(out_combined.shape)
-nn.dropout(p=0.2)
-nn.Linear(14*14*2, 14*14)
-nn.ReLU()
-"""
+class DualEncoder(nn.Module):
+    def __init__(self, encoded_image_size=14, main_resnet = None, sketch_resnet = None, main_has_removed = True, sketch_has_removed = False):
+        super(DualEncoder, self).__init__()
+        self.enc_image_size = encoded_image_size
+
+        if main_resnet is not None:
+            print("Initialize MAIN ENCODER with user-specified resnet101")
+            m_resnet = torchvision.models.resnet101(pretrained=False)
+            m_resnet.load_state_dict(torch.load(main_resnet))
+            if not main_has_removed:
+                self.m_resnet = nn.Sequential(*list(m_resnet.children())[:-2])
+
+        else:
+            print("Initialize MAIN ENCODER with regular pre-trained resnet101")
+            m_resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+            self.m_resnet = nn.Sequential(*list(m_resnet.children())[:-2])
+
+        if sketch_resnet is not None:
+            print("Initialize SKETCH ENCODER with user-specified resnet101")
+            s_resnet = torchvision.models.resnet101(pretrained=False)
+            s_resnet.load_state_dict(torch.load(sketch_resnet))
+            if not sketch_has_removed:
+                self.s_resnet = nn.Sequential(*list(s_resnet.children())[:-2])
+
+        else:
+            print("Initialize SKETCH ENCODER with regular pre-trained resnet101")
+            s_resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+            self.s_resnet = nn.Sequential(*list(s_resnet.children())[:-2])
+
+        # Remove linear and pool layers (since we're not doing classification)
+
+        # Resize image to fixed size to allow input images of variable size
+        self.m_adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
+        self.s_adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
+
+        self.fine_tune()
+
+        self.fc = nn.Linear(14 * 14 * 2, 14 * 14)
+
+    def forward(self, images):
+        """
+        Forward propagation.
+
+        :param images: images, a tensor of dimensions (batch_size, 3, image_size, image_size)
+        :return: encoded images
+        """
+        m_out = self.m_resnet(images)  # (batch_size, 2048, image_size/32, image_size/32)
+        m_out = self.m_adaptive_pool(m_out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
+
+        s_out = self.s_resnet(images)  # (batch_size, 2048, image_size/32, image_size/32)
+        s_out = self.s_adaptive_pool(s_out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
+
+        m_out = m_out.view(batch_size, 2048, 14 * 14)
+        s_out = s_out.view(batch_size, 2048, 14 * 14)
+
+        combined = torch.cat((m_out, s_out), dim = 2) # should have size (batch_size, 2048, 2 * 14 * 14)
+        combined = nn.ReLU(self.fc(combined)).view(batch_size, 2048, 14, 14)
+        print(combined.shape)
+
+        out = combined.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
+        return out
+
+    def fine_tune(self, fine_tune=True):
+        """
+        Allow or prevent the computation of gradients for convolutional blocks 2 through 4 of the encoder.
+
+        :param fine_tune: Allow?
+        """
+        for p in self.m_resnet.parameters():
+            p.requires_grad = False
+        for p in self.s_resnet.parameters():
+            p.requires_grad = False
+
+        # If fine-tuning, only fine-tune convolutional blocks 2 through 4
+        for c in list(self.m_resnet.children())[5:]:
+            for p in c.parameters():
+                p.requires_grad = fine_tune
+
+        for c in list(self.s_resnet.children())[5:]:
+            for p in c.parameters():
+                p.requires_grad = fine_tune
+
 
 
 class Attention(nn.Module):

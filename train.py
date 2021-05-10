@@ -27,7 +27,7 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 30  # number of epochs to train for (if early stopping is not triggered)
+epochs = 3  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
 batch_size = 32
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -40,7 +40,10 @@ print_freq = 20  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 # checkpoint = None  # path to checkpoint, None if none
 checkpoint = 'no_finetune_BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
-main_encoder_resnet = 'sketch_weights79_epoch9.pt'
+main_encoder_resnet = None # should use the pre-trained architecture
+sketch_encoder_resnet = 'sketch_weights79_epoch9.pt'
+
+dual_encoder = False
 
 # Read word map
 word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
@@ -74,39 +77,15 @@ def main():
 
     global best_bleu4, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
-    # Initialize / load checkpoint
-    if checkpoint is None:
-        decoder = DecoderWithAttention(attention_dim=attention_dim,
-                                       embed_dim=emb_dim,
-                                       decoder_dim=decoder_dim,
-                                       vocab_size=len(word_map),
-                                       dropout=dropout)
-        decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
-                                             lr=decoder_lr)
-        encoder = Encoder(specify_resnet=main_encoder_resnet)
-        encoder.fine_tune(fine_tune_encoder)
-        encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
-                                             lr=encoder_lr) if fine_tune_encoder else None
+    if dual_encoder: # this is always initialized with pre-trained models:
+        main_branch_checkpoint = torch.load(checkpoint, map_location='cuda:0')
+        encoder = DualEncoder(sketch_resnet = sketch_encoder_resnet)
+        encoder.m_resnet = main_branch_checkpoint['encoder'].resnet
+        encoder.m_adaptive_pool = main_branch_checkpoint['encoder'].adaptive_pool
 
-    else:
-        checkpoint = torch.load(checkpoint, map_location='cuda:0')
-        # start_epoch = checkpoint['epoch'] + 1
-        # epochs_since_improvement = checkpoint['epochs_since_improvement']
-        # best_bleu4 = checkpoint['bleu-4'] this metric is unfair when we switch to a different domain
         decoder = checkpoint['decoder']
-        # decoder_optimizer = checkpoint['decoder_optimizer']
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
-        if main_encoder_resnet is not None:
-            encoder = Encoder(
-                specify_resnet=main_encoder_resnet)  # specify here so the encoder remove the last 2 layers of resnet
-            encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
-
-        else:
-            encoder = checkpoint['encoder']
-
-        # encoder_optimizer = checkpoint['encoder_optimizer']
-        # if fine_tune_encoder is True and encoder_optimizer is None:
 
         if fine_tune_encoder is True:
             print("Will fine tune Encoder")
@@ -117,6 +96,52 @@ def main():
         else:
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                                  lr=encoder_lr)
+
+
+    else: # following method is for One Encoder architecture
+        # Initialize / load checkpoint
+        if checkpoint is None:
+            decoder = DecoderWithAttention(attention_dim=attention_dim,
+                                           embed_dim=emb_dim,
+                                           decoder_dim=decoder_dim,
+                                           vocab_size=len(word_map),
+                                           dropout=dropout)
+            decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
+                                                 lr=decoder_lr)
+            encoder = Encoder(specify_resnet=main_encoder_resnet)
+            encoder.fine_tune(fine_tune_encoder)
+            encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                                 lr=encoder_lr) if fine_tune_encoder else None
+
+        else:
+            checkpoint = torch.load(checkpoint, map_location='cuda:0')
+            # start_epoch = checkpoint['epoch'] + 1
+            # epochs_since_improvement = checkpoint['epochs_since_improvement']
+            # best_bleu4 = checkpoint['bleu-4'] this metric is unfair when we switch to a different domain
+            decoder = checkpoint['decoder']
+            # decoder_optimizer = checkpoint['decoder_optimizer']
+            decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
+                                                 lr=decoder_lr)
+            if main_encoder_resnet is not None:
+                encoder = Encoder(
+                    specify_resnet=main_encoder_resnet)  # specify here so the encoder remove the last 2 layers of resnet
+                encoder.adaptive_pool = checkpoint['encoder'].adaptive_pool
+
+            else:
+                encoder = checkpoint['encoder']
+
+            # encoder_optimizer = checkpoint['encoder_optimizer']
+            # if fine_tune_encoder is True and encoder_optimizer is None:
+
+            if fine_tune_encoder is True:
+                print("Will fine tune Encoder")
+                encoder.fine_tune(fine_tune_encoder)
+                encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                                     lr=encoder_lr)
+
+            else:
+                encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
+                                                     lr=encoder_lr)
 
     # Move to GPU, if available
     decoder = decoder.to(device)
