@@ -5,13 +5,14 @@ import torch.utils.data
 import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
-from models import Encoder, DecoderWithAttention
+from models import Encoder, DualEncoder, DecoderWithAttention
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 from collections import OrderedDict
 from caption import visualize_att, caption_image_beam_search
 import random
+import numpy as np
 
 # Data parameters
 data_folder = 'nycc'  # folder with data files saved by create_input_files.py
@@ -27,7 +28,7 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 3  # number of epochs to train for (if early stopping is not triggered)
+epochs = 31  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
 batch_size = 32
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -36,12 +37,12 @@ decoder_lr = 4e-4  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_bleu4 = 0.  # BLEU-4 score right now
-print_freq = 20  # print training/validation stats every __ batches
+print_freq = 25  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 # checkpoint = None  # path to checkpoint, None if none
-checkpoint = 'no_finetune_BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
-main_encoder_resnet = None # should use the pre-trained architecture
-sketch_encoder_resnet = 'sketch_weights79_epoch9.pt'
+checkpoint = 'MSCOCO_pretrain.pth.tar'  # main branch checkpoint, it not dual, load entire model
+main_encoder_resnet = None  # should use the pre-trained architecture
+sketch_encoder_resnet = 'sketch_weights71_epoch7.pt'
 
 dual_encoder = False
 
@@ -51,17 +52,18 @@ with open(word_map_file, 'r') as j:
     word_map = json.load(j)
 rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
 
-with open(f'{data_folder}/train.json', 'r') as f:
+with open(f'nycc/train.json', 'r') as f:
     train_files_list = json.load(f)
-    train_files_list = [f"{data_folder}/train_imgs/{t}" for t in train_files_list]
-with open(f'{data_folder}/val.json', 'r') as f:
+    train_files_list = [f"nycc/train_imgs/{t}" for t in train_files_list]
+with open(f'nycc/val.json', 'r') as f:
     val_files_list = json.load(f)
-    val_files_list = [f"{data_folder}/val_imgs/{t}" for t in val_files_list]
+    val_files_list = [f"nycc/val_imgs/{t}" for t in val_files_list]
 
 
 def run_samples(encoder, decoder, fs, n, path_prefix, word_map, rev_word_map):
-    for i in range(n):
-        f = fs[random.randint(0, len(fs) - 1)]
+    all_chosen = np.random.choice(len(fs), n)
+    for i in all_chosen:
+        f = fs[i]
         # Encode, decode with attention and beam search
         seq, alphas = caption_image_beam_search(encoder, decoder, f, word_map, 5)
         alphas = torch.FloatTensor(alphas)
@@ -77,18 +79,19 @@ def main():
 
     global best_bleu4, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
-    if dual_encoder: # this is always initialized with pre-trained models:
+    if dual_encoder:  # this is always initialized with pre-trained models:
+        print("DUAL ENCODER")
         main_branch_checkpoint = torch.load(checkpoint, map_location='cuda:0')
-        encoder = DualEncoder(sketch_resnet = sketch_encoder_resnet)
+        encoder = DualEncoder(sketch_resnet=sketch_encoder_resnet)
         encoder.m_resnet = main_branch_checkpoint['encoder'].resnet
-        encoder.m_adaptive_pool = main_branch_checkpoint['encoder'].adaptive_pool
+        # encoder.m_adaptive_pool = main_branch_checkpoint['encoder'].adaptive_pool
 
-        decoder = checkpoint['decoder']
+        decoder = main_branch_checkpoint['decoder']
         decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
 
         if fine_tune_encoder is True:
-            print("Will fine tune Encoder")
+            print("!!! Will fine tune Encoder !!!")
             encoder.fine_tune(fine_tune_encoder)
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                                  lr=encoder_lr)
@@ -98,7 +101,7 @@ def main():
                                                  lr=encoder_lr)
 
 
-    else: # following method is for One Encoder architecture
+    else:  # following method is for One Encoder architecture
         # Initialize / load checkpoint
         if checkpoint is None:
             decoder = DecoderWithAttention(attention_dim=attention_dim,
@@ -156,7 +159,7 @@ def main():
 
     # data augmention for nycc dataset
     augment = transforms.Compose([
-        transforms.RandomAffine(10, (0.1, 0.1), (0.9, 1.2)),
+        transforms.RandomAffine(20, (0.1, 0.1), (0.8, 1.2)),
         transforms.RandomHorizontalFlip(p=0.5)])
 
     train_loader = torch.utils.data.DataLoader(
@@ -170,12 +173,12 @@ def main():
     for epoch in range(start_epoch, epochs):
 
         # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
-        if epochs_since_improvement == 30:
-            break
-        if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
-            adjust_learning_rate(decoder_optimizer, 0.8)
-            if fine_tune_encoder:
-                adjust_learning_rate(encoder_optimizer, 0.8)
+        # if epochs_since_improvement == 40:
+        #    break
+        # if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
+        #    adjust_learning_rate(decoder_optimizer, 0.8)
+        #    if fine_tune_encoder:
+        #        adjust_learning_rate(encoder_optimizer, 0.8)
 
         # One epoch's training
         train(train_loader=train_loader,
@@ -400,10 +403,14 @@ def validate(val_loader, encoder, decoder, criterion, epoch):
                 top5=top5accs,
                 bleu=bleu4))
         # Run on some examples
+        # print(encoder.weights1)
 
     # print(f'run on examples after epoch {epoch}')
     # run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
-    run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
+
+    if epoch % 5 == 0:
+        # run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
+        run_samples(encoder, decoder, val_files_list, 5, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
 
     return bleu4
 

@@ -10,7 +10,7 @@ class Encoder(nn.Module):
     Encoder.
     """
 
-    def __init__(self, encoded_image_size=14, specify_resnet = None):
+    def __init__(self, encoded_image_size=14, specify_resnet=None):
         super(Encoder, self).__init__()
         self.enc_image_size = encoded_image_size
 
@@ -20,7 +20,7 @@ class Encoder(nn.Module):
             resnet.load_state_dict(torch.load(specify_resnet))
 
         else:
-            print("Initialize with regular pre-trained resnet101")
+            print("Initialize with pre-trained resnet101.")
             resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
 
         # Remove linear and pool layers (since we're not doing classification)
@@ -59,7 +59,8 @@ class Encoder(nn.Module):
 
 
 class DualEncoder(nn.Module):
-    def __init__(self, encoded_image_size=14, main_resnet = None, sketch_resnet = None, main_has_removed = True, sketch_has_removed = False):
+    def __init__(self, encoded_image_size=14, main_resnet=None, sketch_resnet=None, main_has_removed=True,
+                 sketch_has_removed=False):
         super(DualEncoder, self).__init__()
         self.enc_image_size = encoded_image_size
 
@@ -71,8 +72,8 @@ class DualEncoder(nn.Module):
                 self.m_resnet = nn.Sequential(*list(m_resnet.children())[:-2])
 
         else:
-            print("Initialize MAIN ENCODER with regular pre-trained resnet101")
-            m_resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+            print("Initialize MAIN ENCODER with non pre-trained resnet101. You should load checkpoint.")
+            m_resnet = torchvision.models.resnet101(pretrained=False)  # pretrained ImageNet ResNet-101
             self.m_resnet = nn.Sequential(*list(m_resnet.children())[:-2])
 
         if sketch_resnet is not None:
@@ -83,19 +84,19 @@ class DualEncoder(nn.Module):
                 self.s_resnet = nn.Sequential(*list(s_resnet.children())[:-2])
 
         else:
-            print("Initialize SKETCH ENCODER with regular pre-trained resnet101")
-            s_resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+            print("Initialize SKETCH ENCODER with non pre-trained resnet101. You should load checkpoint.")
+            s_resnet = torchvision.models.resnet101(pretrained=False)  # pretrained ImageNet ResNet-101
             self.s_resnet = nn.Sequential(*list(s_resnet.children())[:-2])
 
         # Remove linear and pool layers (since we're not doing classification)
 
-        # Resize image to fixed size to allow input images of variable size
-        self.m_adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
-        self.s_adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
-
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
         self.fine_tune()
+        self.weights1 = nn.Parameter(torch.ones(2048) * 0.5)
+        self.weights1.requires_grad = True
 
-        self.fc = nn.Linear(14 * 14 * 2, 14 * 14)
+        # self.weights2 = nn.Parameter(torch.ones(2048) * 0.5)
+        # self.weights2.requires_grad = True
 
     def forward(self, images):
         """
@@ -105,17 +106,18 @@ class DualEncoder(nn.Module):
         :return: encoded images
         """
         m_out = self.m_resnet(images)  # (batch_size, 2048, image_size/32, image_size/32)
-        m_out = self.m_adaptive_pool(m_out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
 
         s_out = self.s_resnet(images)  # (batch_size, 2048, image_size/32, image_size/32)
-        s_out = self.s_adaptive_pool(s_out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
 
-        m_out = m_out.view(batch_size, 2048, 14 * 14)
-        s_out = s_out.view(batch_size, 2048, 14 * 14)
+        m_out = m_out.permute(0, 2, 3, 1)  # (batch_size, image_size/32, image_size/32, 2048)
+        s_out = s_out.permute(0, 2, 3, 1)
 
-        combined = torch.cat((m_out, s_out), dim = 2) # should have size (batch_size, 2048, 2 * 14 * 14)
-        combined = nn.ReLU(self.fc(combined)).view(batch_size, 2048, 14, 14)
-        print(combined.shape)
+        batch_size = images.shape[0]
+        ftsize = m_out.shape[2]
+
+        combined = m_out * self.weights1 + s_out * (1 - self.weights1)
+        combined = self.adaptive_pool(combined.permute(0, 3, 1, 2))
+        # print(combined.shape)
 
         out = combined.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
         return out
@@ -139,7 +141,6 @@ class DualEncoder(nn.Module):
         for c in list(self.s_resnet.children())[5:]:
             for p in c.parameters():
                 p.requires_grad = fine_tune
-
 
 
 class Attention(nn.Module):
