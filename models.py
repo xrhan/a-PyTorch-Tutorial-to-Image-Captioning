@@ -92,11 +92,11 @@ class DualEncoder(nn.Module):
 
         self.adaptive_pool = nn.AdaptiveAvgPool2d((encoded_image_size, encoded_image_size))
         self.fine_tune()
-        self.weights1 = nn.Parameter(torch.ones(2048) * 0.5)
+        self.weights1 = nn.Parameter(torch.ones(2048) * 0.7)
         self.weights1.requires_grad = True
 
-        # self.weights2 = nn.Parameter(torch.ones(2048) * 0.5)
-        # self.weights2.requires_grad = True
+        self.weights2 = nn.Parameter(torch.ones(2048) * 0.3)
+        self.weights2.requires_grad = True
 
     def forward(self, images):
         """
@@ -115,7 +115,7 @@ class DualEncoder(nn.Module):
         batch_size = images.shape[0]
         ftsize = m_out.shape[2]
 
-        combined = m_out * self.weights1 + s_out * (1 - self.weights1)
+        combined = m_out * self.weights1 + s_out * self.weights2
         combined = self.adaptive_pool(combined.permute(0, 3, 1, 2))
         # print(combined.shape)
 

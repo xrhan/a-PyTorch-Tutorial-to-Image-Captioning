@@ -15,7 +15,8 @@ import random
 import numpy as np
 
 # Data parameters
-data_folder = 'nycc'  # folder with data files saved by create_input_files.py
+#data_folder = 'nycc_out_captions'  # folder with data files saved by create_input_files.py
+data_folder = 'nycc_out_good_vocab'
 data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
@@ -28,7 +29,7 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 31  # number of epochs to train for (if early stopping is not triggered)
+epochs = 41  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
 batch_size = 32
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -40,11 +41,15 @@ best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 25  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 # checkpoint = None  # path to checkpoint, None if none
-checkpoint = 'MSCOCO_pretrain.pth.tar'  # main branch checkpoint, it not dual, load entire model
+# checkpoint = 'BEST_description_pre_train_single.pth.tar'  # main branch checkpoint, it not dual, load entire model
+checkpoint = 'good_vocab_BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
 main_encoder_resnet = None  # should use the pre-trained architecture
 sketch_encoder_resnet = 'sketch_weights71_epoch7.pt'
 
-dual_encoder = False
+dual_encoder = True
+#dual_encoder_checkpoint = 'BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
+dual_encoder_checkpoint = 'dual_BEST_description_pre_train.pth.tar'
+
 
 # Read word map
 word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
@@ -52,12 +57,12 @@ with open(word_map_file, 'r') as j:
     word_map = json.load(j)
 rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
 
-with open(f'nycc/train.json', 'r') as f:
+with open(f'nycc_out_good_vocab/train_imgs/train_path.json', 'r') as f:
     train_files_list = json.load(f)
-    train_files_list = [f"nycc/train_imgs/{t}" for t in train_files_list]
-with open(f'nycc/val.json', 'r') as f:
+    train_files_list = [f"nycc_out_good_vocab/train_imgs/{t}.jpg" for t in train_files_list]
+with open(f'nycc_out_good_vocab/val_imgs/val_path.json', 'r') as f:
     val_files_list = json.load(f)
-    val_files_list = [f"nycc/val_imgs/{t}" for t in val_files_list]
+    val_files_list = [f"nycc_out_good_vocab/val_imgs/{t}.jpg" for t in val_files_list]
 
 
 def run_samples(encoder, decoder, fs, n, path_prefix, word_map, rev_word_map):
@@ -81,14 +86,25 @@ def main():
 
     if dual_encoder:  # this is always initialized with pre-trained models:
         print("DUAL ENCODER")
-        main_branch_checkpoint = torch.load(checkpoint, map_location='cuda:0')
-        encoder = DualEncoder(sketch_resnet=sketch_encoder_resnet)
-        encoder.m_resnet = main_branch_checkpoint['encoder'].resnet
-        # encoder.m_adaptive_pool = main_branch_checkpoint['encoder'].adaptive_pool
+        if dual_encoder_checkpoint is not None:
+            print('Loaded Dual Encoder Checkpoint')
+            dual_branch_checkpoint = torch.load(checkpoint, map_location='cuda:0')
+            encoder = dual_branch_checkpoint['encoder']
 
-        decoder = main_branch_checkpoint['decoder']
-        decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
+            decoder = dual_branch_checkpoint['decoder']
+            decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
                                              lr=decoder_lr)
+
+        else:
+            main_branch_checkpoint = torch.load(checkpoint, map_location='cuda:0')
+            encoder = DualEncoder(sketch_resnet=sketch_encoder_resnet)
+            encoder.m_resnet = main_branch_checkpoint['encoder'].resnet
+            print("Use pre-trained resnet")
+            # encoder.m_adaptive_pool = main_branch_checkpoint['encoder'].adaptive_pool
+
+            decoder = main_branch_checkpoint['decoder']
+            decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
+                                                lr=decoder_lr)
 
         if fine_tune_encoder is True:
             print("!!! Will fine tune Encoder !!!")
@@ -409,7 +425,7 @@ def validate(val_loader, encoder, decoder, criterion, epoch):
     # run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
 
     if epoch % 5 == 0:
-        # run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
+        run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
         run_samples(encoder, decoder, val_files_list, 5, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
 
     return bleu4
