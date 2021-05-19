@@ -29,12 +29,12 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 41  # number of epochs to train for (if early stopping is not triggered)
+epochs = 31  # number of epochs to train for (if early stopping is not triggered)
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
 batch_size = 32
 workers = 1  # for data-loading; right now, only 1 works with h5py
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
-decoder_lr = 4e-4  # learning rate for decoder
+decoder_lr = 2e-4  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_bleu4 = 0.  # BLEU-4 score right now
@@ -46,7 +46,7 @@ checkpoint = 'good_vocab_BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.
 main_encoder_resnet = None  # should use the pre-trained architecture
 sketch_encoder_resnet = 'sketch_weights71_epoch7.pt'
 
-dual_encoder = True
+dual_encoder = False
 #dual_encoder_checkpoint = 'BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'
 dual_encoder_checkpoint = 'dual_BEST_description_pre_train.pth.tar'
 
@@ -425,8 +425,8 @@ def validate(val_loader, encoder, decoder, criterion, epoch):
     # run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
 
     if epoch % 5 == 0:
-        run_samples(encoder, decoder, train_files_list, 2, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
-        run_samples(encoder, decoder, val_files_list, 5, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
+        run_samples(encoder, decoder, train_files_list, 1, f'sample_out/train_epoch_{epoch}', word_map, rev_word_map)
+        run_samples(encoder, decoder, val_files_list, 2, f'sample_out/val_epoch_{epoch}', word_map, rev_word_map)
 
     return bleu4
 
